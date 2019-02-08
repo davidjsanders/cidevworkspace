@@ -1,0 +1,31 @@
+################################################################
+# API
+################################################################
+
+debug = false
+
+[api]
+  entryPoint = "traefik"
+  dashboard = true
+  debug = true
+  
+################################################################
+# Metrics
+################################################################
+
+[metrics]
+  [metrics.prometheus]
+    entryPoint = "traefik"
+    buckets = [0.1,0.3,1.2,5.0]
+
+################################################################
+# Docker Provider
+################################################################
+
+[docker]
+  endpoint = "tcp://socat:2375"
+#  endpoint = "/var/run/docker.sock"
+  watch = true
+  swarmMode = false
+  exposedByDefault = false
+  usebindportip = true

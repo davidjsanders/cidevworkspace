@@ -1,0 +1,34 @@
+#!/usr/bin/env sh
+
+if [  -z ${1+x} ]
+then
+    echo "Action must be: init or traefik"
+    exit 1
+fi
+
+action=$(echo $1 | tr '[a-z]' '[A-Z]')
+docker_socket=/var/run/docker.sock
+docker_group=docker
+docker_user=traefiker
+
+
+if [ "$action" == "INIT" ]
+then
+    docker_gid=$(stat -c '%g' ${docker_socket})
+    if [ "$docker_gid" == "0" ]
+    then
+        gname=$(getent group 0 | cut -d: -f1)
+        echo "Add ${docker_user} to group ${gname}"
+        /usr/sbin/addgroup ${docker_user} ${gname}
+    else
+        echo "Add host Docker group ${docker_gid} as container group ${docker_group}"
+        /usr/sbin/addgroup -S -g ${docker_gid} ${docker_group}
+        echo "Add user ${docker_user} to container group ${docker_group}"
+        /usr/sbin/addgroup ${docker_user} ${docker_group}
+    fi
+elif [ "$action" == "TRAEFIK" ]
+then
+  shift
+  echo "traefik $@"
+  su traefiker -c "/usr/local/bin/traefik $@"
+fi

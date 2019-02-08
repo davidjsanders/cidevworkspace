@@ -1,0 +1,143 @@
+version: '3.7'
+
+services:
+  socat:
+    # Reference: https://blog.mikesir87.io/2018/07/letting-traefik-run-on-worker-nodes/
+    # Using socat allows the redirection of the docker sock and means only socat has
+    # to run on managers
+    image: alpine/socat:1.0.3
+    command: tcp-listen:2375,fork,reuseaddr unix-connect:/var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - cidev_network
+  traefik:
+    # Reference: https://blog.mikesir87.io/2018/07/letting-traefik-run-on-worker-nodes/
+    # Using socat allows the redirection of the docker sock and means only socat has
+    # to run on managers. Here, traefik is running on any worker node and using the
+    # swarm mesh to route traffic in.
+    #
+    image: traefik:v1.7-alpine  # The official Traefik docker image
+    volumes:
+      - ./config/traefik.toml:/etc/traefik/traefik.toml
+    ports:
+      - "80:80"      # The HTTP port
+      - "8080:8080"  # The Web UI (enabled by --api)
+    networks:
+      - cidev_network
+    restart: always
+  grafana:
+    image: grafana/grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - 3000:3000
+    environment:
+      - "GF_SERVER_ROOT_URL=http://192.168.99.100"
+      - "GF_SECURITY_ADMIN_PASSWORD=secret"
+      - "GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clock-panel,grafana-simple-json-datasource"
+    # depends_on:
+    #   - cadvisor
+    #   - prometheus
+    networks:
+      - cidev_network
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - 9090:9090
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+    # depends_on:
+    #   - cadvisor
+    networks:
+      - cidev_network
+  sonarqube:
+    image: sonarqube:7.5-community
+    ports:
+      - 9000:9000
+    volumes:
+      - cidev_sonar_conf:/opt/sonarqube/conf
+      - cidev_sonar_data:/opt/sonarqube/data
+      - cidev_sonar_logs:/opt/sonarqube/logs
+      - cidev_sonar_extensions:/opt/sonarqube/extensions
+    networks:
+      - cidev_network
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: cidev_network
+      traefik.frontend.rule: "Host: sonarqube"
+      traefik.port: 9000
+      traefik.backend: "sonarqube"
+  jenkins:
+#    image: 'jenkins/jenkins:2.157-alpine'
+    image: 'dsanderscan/cidev-jenkins:dev-0.1'
+    volumes:
+      - cidev_jenkins:/var/jenkins_home
+    ports:
+      - 50000:50000
+    networks:
+      - cidev_network
+    environment:
+      - DOCKER_HOST=tcp://socat:2375
+#      - JENKINS_OPTS="--prefix=/jenkins"
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: cidev_network
+      traefik.frontend.rule: "Host: jenkins_dev"
+      traefik.port: 8080
+      traefik.frontend.passHostHeader: false
+      traefik.backend: "backend-jenkins-docker"
+      traefik.weight: 1
+    restart: always
+  nexus3:
+    image: dsanderscan/nexus3:dev-0.1
+    volumes:
+      - cidev_nexus:/nexus-data
+      - cidev_nexus_userroot:/userRoot
+      - cidev_nexus_blobs:/blob-store
+      - ./config/nexus.properties:/nexus-data/etc/nexus.properties
+    networks:
+      - cidev_network
+    environment:
+      - "INSTALL4J_ADD_VM_PARAMS=-Djava.util.prefs.userRoot=/userRoot"
+    labels:
+      traefik.entryPoints: http
+      traefik.enable: "true"
+      traefik.ui.docker.network: cidev_network
+      traefik.ui.backend: "nexus-ui"
+      traefik.ui.frontend.rule: "PathPrefix: /${nexus_prefix-nexus}"
+      traefik.ui.port: 8081
+      traefik.registry.backend: "docker-hub"
+      #
+      # For Docker to work, it must be host.domain.tld
+      #
+      traefik.registry.frontend.rule: "Host: docker-hub.dsanders.com"
+      traefik.registry.port: 18080
+      traefik.registry.frontend.passHostHeader: true
+      traefik.prireg.backend: "docker-private"
+      #
+      # For Docker to work, it must be host.domain.tld
+      #
+      traefik.prireg.frontend.rule: "Host: docker-private.dsanders.com"
+      traefik.prireg.port: 18081
+    restart: always
+networks:
+  cidev_network:
+volumes:
+  grafana_data:
+  cidev_sonar_conf:
+    external: true
+  cidev_sonar_data:
+    external: true
+  cidev_sonar_logs:
+    external: true
+  cidev_sonar_extensions:
+    external: true
+  cidev_jenkins:
+    external: true
+  cidev_nexus:
+    external: true
+  cidev_nexus_userroot:
+    external: true
+  cidev_nexus_blobs:
+    external: true

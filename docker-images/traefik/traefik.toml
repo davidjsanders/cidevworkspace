@@ -1,0 +1,39 @@
+logLevel = "DEBUG"
+
+################################################################
+# API
+################################################################
+
+[api]
+  entryPoint = "traefik"
+  dashboard = true
+  debug = true
+  
+################################################################
+# Metrics
+################################################################
+
+[metrics]
+  [metrics.prometheus]
+    entryPoint = "traefik"
+    buckets = [0.1,0.3,1.2,5.0]
+
+################################################################
+# Docker Provider
+################################################################
+
+[docker]
+#  endpoint = "tcp://socat:2375"
+  endpoint = "unix:///var/run/docker.sock"
+  watch = true
+  swarmMode = false
+  exposedByDefault = false
+  usebindportip = false
+
+################################################################
+# entryPoints
+################################################################
+
+[entryPoints]
+    [entryPoints.http]
+    address = ":8000"
