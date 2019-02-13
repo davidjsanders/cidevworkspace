@@ -20,57 +20,96 @@ services:
     image: traefik:v1.7-alpine  # The official Traefik docker image
     volumes:
       - ./config/traefik.toml:/etc/traefik/traefik.toml
+      - ./selfsigned.crt:/certs/selfsigned.crt
+      - ./selfsigned.key:/certs/selfsigned.key
     ports:
       - "80:80"      # The HTTP port
+      - "443:443"    # The HTTPS port
       - "8080:8080"  # The Web UI (enabled by --api)
     networks:
       - cidev_network
     restart: always
-  grafana:
-    image: grafana/grafana
+    depends_on:
+      - socat
+  cadvisor:
+    image: google/cadvisor
+    command: --http_digest_realm="localhost/cadvisor"
     volumes:
-      - grafana_data:/var/lib/grafana
-    ports:
-      - 3000:3000
-    environment:
-      - "GF_SERVER_ROOT_URL=http://192.168.99.100"
-      - "GF_SECURITY_ADMIN_PASSWORD=secret"
-      - "GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clock-panel,grafana-simple-json-datasource"
-    # depends_on:
-    #   - cadvisor
-    #   - prometheus
+     - /:/rootfs:ro
+     - /var/run:/var/run:rw
+     - /sys:/sys:ro
+     - /var/lib/docker/:/var/lib/docker:ro
+    depends_on:
+      - traefik
     networks:
       - cidev_network
+    labels:
+      traefik.enable: "true"
+      traefik.ca.frontend.entryPoints: https
+      traefik.ca.docker.network: cidev_network
+      traefik.ca.backend: "cadvisor"
+      traefik.ca.frontend.rule: "PathPrefix:/"
+      traefik.ca.backend.protocol: http
+      traefik.ca.port: 8080
+  grafana:
+    image: grafana/grafana
+    command: -config=/etc/grafana/grafana.ini
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana.ini:/etc/grafana/grafana.ini
+    networks:
+      - cidev_network
+    depends_on:
+      - prometheus
+    labels:
+      traefik.ui.frontend.entryPoints: https
+      traefik.enable: "true"
+      traefik.ui.docker.network: cidev_network
+      traefik.ui.frontend.passHostHeader: true
+      traefik.ui.backend: "grafana"
+      traefik.ui.frontend.rule: "Host:dasander-air.local;PathPrefixStrip: /grafana"
+      traefik.ui.port: 3000
+      traefik.ui.backend.protocol: http
   prometheus:
     image: prom/prometheus:latest
+    command: --web.external-url=https://dasander-air.local/prometheus --config.file=/etc/prometheus/prometheus.yml
     ports:
       - 9090:9090
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
     # depends_on:
     #   - cadvisor
+    labels:
+      traefik.ui.frontend.entryPoints: https
+      traefik.enable: "true"
+      traefik.ui.docker.network: cidev_network
+      traefik.ui.backend: "prometheus"
+      traefik.ui.frontend.rule: "Host:dasander-air.local;PathPrefix: /prometheus"
+      traefik.ui.port: 9090
+      traefik.ui.backend.protocol: http
     networks:
       - cidev_network
   sonarqube:
     image: sonarqube:7.5-community
-    ports:
-      - 9000:9000
     volumes:
       - cidev_sonar_conf:/opt/sonarqube/conf
       - cidev_sonar_data:/opt/sonarqube/data
       - cidev_sonar_logs:/opt/sonarqube/logs
       - cidev_sonar_extensions:/opt/sonarqube/extensions
+      - ./config/sonar.properties:/opt/sonarqube/conf/sonar.properties
     networks:
       - cidev_network
     labels:
+      traefik.ui.frontend.entryPoints: https
       traefik.enable: "true"
-      traefik.docker.network: cidev_network
-      traefik.frontend.rule: "Host: sonarqube"
-      traefik.port: 9000
-      traefik.backend: "sonarqube"
+      traefik.ui.docker.network: cidev_network
+      traefik.ui.backend: "sonarqube"
+      traefik.ui.frontend.rule: "Host:dasander-air.local;PathPrefix: /sonarqube"
+      traefik.ui.port: 9000
+      traefik.ui.backend.protocol: http
   jenkins:
-#    image: 'jenkins/jenkins:2.157-alpine'
-    image: 'dsanderscan/cidev-jenkins:dev-0.1'
+    image: dsanderscan/cidev-jenkins:dev-0.2-2.164
+    command: --prefix=/jenkins
     volumes:
       - cidev_jenkins:/var/jenkins_home
     ports:
@@ -79,18 +118,18 @@ services:
       - cidev_network
     environment:
       - DOCKER_HOST=tcp://socat:2375
-#      - JENKINS_OPTS="--prefix=/jenkins"
     labels:
       traefik.enable: "true"
-      traefik.docker.network: cidev_network
-      traefik.frontend.rule: "Host: jenkins_dev"
-      traefik.port: 8080
-      traefik.frontend.passHostHeader: false
-      traefik.backend: "backend-jenkins-docker"
-      traefik.weight: 1
+      traefik.ui.frontend.entryPoints: https
+      traefik.ui.docker.network: cidev_network
+      traefik.ui.frontend.rule: "PathPrefix: /jenkins"
+      traefik.ui.port: 8080
+      traefik.ui.frontend.passHostHeader: false
+      traefik.ui.backend: "backend-jenkins-docker"
+      traefik.ui.backend.protocol: http
     restart: always
   nexus3:
-    image: dsanderscan/nexus3:dev-0.1
+    image: dsanderscan/nexus3:dev-0.1-3.15.2
     volumes:
       - cidev_nexus:/nexus-data
       - cidev_nexus_userroot:/userRoot
@@ -101,13 +140,15 @@ services:
     environment:
       - "INSTALL4J_ADD_VM_PARAMS=-Djava.util.prefs.userRoot=/userRoot"
     labels:
-      traefik.entryPoints: http
+      traefik.ui.frontend.entryPoints: https
       traefik.enable: "true"
       traefik.ui.docker.network: cidev_network
       traefik.ui.backend: "nexus-ui"
-      traefik.ui.frontend.rule: "PathPrefix: /${nexus_prefix-nexus}"
+      traefik.ui.frontend.rule: "PathPrefix: /nexus"
+      traefik.ui.frontend.passHostHeader: false
       traefik.ui.port: 8081
       traefik.registry.backend: "docker-hub"
+      traefik.ui.backend.protocol: http
       #
       # For Docker to work, it must be host.domain.tld
       #

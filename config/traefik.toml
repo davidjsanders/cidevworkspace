@@ -1,8 +1,8 @@
+logLevel = "DEBUG"
+
 ################################################################
 # API
 ################################################################
-
-debug = false
 
 [api]
   entryPoint = "traefik"
@@ -29,3 +29,28 @@ debug = false
   swarmMode = false
   exposedByDefault = false
   usebindportip = true
+
+################################################################
+# Entrypoints
+################################################################
+
+[entryPoints]
+  # http should be redirected to https
+  [entryPoints.http]
+  address = ":80"
+    # [entryPoints.http.redirect]
+    # entryPoint = "https"
+  # https is the default
+  [entryPoints.https]
+  address = ":443"
+  insecureSkipVerify = true
+    [entryPoints.https.tls]
+      [[entryPoints.https.tls.certificates]]
+        certFile = "/certs/selfsigned.crt"
+        keyFile = "/certs/selfsigned.key"
+
+# [[tls]]
+#   entryPoints = ["https"]
+#   [tls.certificate]
+#     certFile = "/certs/cert.crt"
+#     keyFile = "/certs/cert.key"
